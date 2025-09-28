@@ -1,11 +1,15 @@
+mod recap_display;
+
 pub struct KrarkHarness {
     test_args: libtest_mimic::Arguments,
+    name: String,
 }
 
 impl KrarkHarness {
-    pub fn new() -> KrarkHarness {
+    pub fn new(name: String) -> KrarkHarness {
         KrarkHarness {
             test_args: libtest_mimic::Arguments::from_args(),
+            name,
         }
     }
 
@@ -15,12 +19,20 @@ impl KrarkHarness {
         &mut self,
         test_func: F,
     ) {
+        let mut recap = KrarkRecap::new();
+
         for card in mtg_cardbase::ALL_CARDS.iter() {
-            let _result =
+            let result =
                 match std::panic::catch_unwind(|| test_func(card, KrarkResult::Ok { passed: 0 })) {
                     Ok(result) => result,
                     Err(payload) => KrarkResult::from_panic_payload(payload),
                 };
+            recap.add_result(result);
+        }
+
+        match recap_display::output_recap(&self, recap) {
+            Ok(_) => { /* all good */ }
+            Err(e) => println!("Failed to output recap: {e}"),
         }
     }
 
@@ -31,13 +43,21 @@ impl KrarkHarness {
         sample_size: usize,
         test_func: F,
     ) {
+        let mut recap = KrarkRecap::new();
+
         let jump_size = (mtg_cardbase::ALL_CARDS.len() / sample_size).saturating_sub(1);
         for card in mtg_cardbase::ALL_CARDS.iter().step_by(jump_size) {
-            let _result =
+            let result =
                 match std::panic::catch_unwind(|| test_func(card, KrarkResult::Ok { passed: 0 })) {
                     Ok(result) => result,
                     Err(payload) => KrarkResult::from_panic_payload(payload),
                 };
+            recap.add_result(result);
+        }
+
+        match recap_display::output_recap(&self, recap) {
+            Ok(_) => { /* all good */ }
+            Err(e) => println!("Failed to output recap: {e}"),
         }
     }
 }
@@ -50,6 +70,7 @@ pub enum KrarkResult {
 
 impl KrarkResult {
     fn from_panic_payload(payload: Box<dyn std::any::Any + Send + 'static>) -> KrarkResult {
+        /* Most panic payloads are strings with panic info */
         let trace = if let Some(s) = payload.downcast_ref::<&str>() {
             s.to_string()
         } else if let Some(s) = payload.downcast_ref::<String>() {
@@ -107,5 +128,28 @@ impl KrarkResult {
                 "Assertion failed: {name}, expected Ok(_), found Err({err:?})"
             )),
         };
+    }
+}
+
+struct KrarkRecap {
+    passed: usize,
+    failed: usize,
+    panicked: usize,
+}
+
+impl KrarkRecap {
+    fn new() -> KrarkRecap {
+        KrarkRecap {
+            passed: 0,
+            failed: 0,
+            panicked: 0,
+        }
+    }
+    fn add_result(&mut self, result: KrarkResult) {
+        match result {
+            KrarkResult::Ok { .. } => self.passed += 1,
+            KrarkResult::Err { .. } => self.failed += 1,
+            KrarkResult::Panicked { .. } => self.panicked += 1,
+        }
     }
 }
