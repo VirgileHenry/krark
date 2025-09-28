@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 libtest-mimic = "0.8.1"
+mtg-cardbase = { path = "deps/mtg-cardbase" }
