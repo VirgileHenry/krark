@@ -1,3 +1,8 @@
+const COLOR_GREEN: &str = "\x1b[32m";
+const COLOR_RED: &str = "\x1b[31m";
+const COLOR_RESET: &str = "\x1b[0m";
+
+
 pub fn output_recap(
     harness: &crate::KrarkHarness,
     recap: crate::KrarkRecap,
@@ -11,10 +16,16 @@ pub fn output_recap(
                 .open(path)?,
         ),
     };
-    let _color: bool = match (&harness.test_args.color, &harness.test_args.logfile) {
+    let color: bool = match (&harness.test_args.color, &harness.test_args.logfile) {
         (Some(libtest_mimic::ColorSetting::Always), _) => true,
         (Some(libtest_mimic::ColorSetting::Never), _) => false,
         (_, logfile) => logfile.is_none(),
+    };
+
+    let (color_green, color_red, color_reset) = if color {
+        (COLOR_GREEN, COLOR_RED, COLOR_RESET)
+    } else {
+        ("", "", "")
     };
 
     let passed = recap.passed;
@@ -22,39 +33,52 @@ pub fn output_recap(
     let panicked = recap.panicked;
     let total = passed + failed + panicked;
 
+    let color_passed = if passed == total {
+        color_green
+    } else {
+        color_red
+    };
+    let color_failed = match failed {
+        0 => color_green,
+        _ => color_red,
+    };
+    let color_panicked = match panicked {
+        0 => color_green,
+        _ => color_red,
+    };
+    let color_total = color_reset;
+
     let lines = [
-        ("Passed", format!("{}", passed)),
-        ("Failed", format!("{}", failed)),
-        ("Panicked", format!("{}", panicked)),
-        ("Total", format!("{}", total)),
+        ("Passed", format!("{}{} ({:.1}%){}",  color_passed, passed, passed as f32 / total as f32 * 100.0, color_reset)),
+        ("Failed", format!("{}{} ({:.1}%){}", color_failed, failed, failed as f32 / total as f32 * 100.0, color_reset)),
+        ("Panicked", format!("{}{} ({:.1}%){}", color_panicked, panicked, panicked as f32 / total as f32 * 100.0, color_reset)),
+        ("Total", format!("{}{}{}", color_total, total, color_reset)),
     ];
 
-    let title_required_size = harness.name.chars().count();
     let status_column_width = lines
         .iter()
-        .map(|(name, _)| name.chars().count())
+        .map(|(name, _)| terminal_str_len(name))
+        .chain(std::iter::once(terminal_str_len(&harness.name)))
         .max()
         .unwrap_or(0);
     let result_column_width = lines
         .iter()
-        .map(|(_, res)| res.chars().count())
+        .map(|(_, res)| terminal_str_len(res))
         .max()
         .unwrap_or(0);
-    /* Increase status column if the title require it */
-    let status_column_width =
-        status_column_width.max(title_required_size.saturating_sub(1 + result_column_width));
 
     let mut table_display =
         TableDisplay::new(&mut output, [status_column_width, result_column_width]);
 
     table_display.separator_line("┏", &[("━", "━"), ("━", "┓")])?;
     table_display.result_line("┃", &[(&harness.name, " "), ("", "┃")])?;
-    table_display.separator_line("┣", &[("━", "┯"), ("━", "┨")])?;
-    table_display.result_line("┃", &[("Passed", "│"), (&format!("{}", passed), "┃")])?;
-    table_display.separator_line("┣", &[("─", "┼"), ("─", "┨")])?;
-    table_display.result_line("┃", &[("Failed", "│"), (&format!("{}", failed), "┃")])?;
-    table_display.result_line("┃", &[("Panicked", "│"), (&format!("{}", panicked), "┃")])?;
-    table_display.result_line("┃", &[("Total", "│"), (&format!("{}", total), "┃")])?;
+    table_display.separator_line("┣", &[("━", "┯"), ("━", "┫")])?;
+    for (i, (status, result)) in lines.iter().enumerate() {
+        table_display.result_line("┃", &[(*status, "│"), (result, "┃")])?;
+        if i < lines.len() - 1 {
+            table_display.separator_line("┠", &[("─", "┼"), ("─", "┨")])?;
+        }
+    }
     table_display.separator_line("┗", &[("━", "┷"), ("━", "┛")])?;
 
     Ok(())
@@ -81,6 +105,7 @@ impl<'out, W: std::io::Write, const N: usize> TableDisplay<'out, W, N> {
             }
             self.output.write(column_end.as_bytes())?;
         }
+        self.output.write("\n".as_bytes())?;
         Ok(())
     }
 
@@ -88,11 +113,18 @@ impl<'out, W: std::io::Write, const N: usize> TableDisplay<'out, W, N> {
         self.output.write(first.as_bytes())?;
         for ((column_value, end_sep), size) in columns.iter().zip(self.column_sizes.iter()) {
             self.output.write(column_value.as_bytes())?;
-            for _ in 0..*size {
+            for _ in terminal_str_len(column_value)..*size {
                 self.output.write(" ".as_bytes())?;
             }
             self.output.write(end_sep.as_bytes())?;
         }
+        self.output.write("\n".as_bytes())?;
         Ok(())
     }
+}
+
+fn terminal_str_len(input: &str) -> usize {
+    let ansi_regex = regex::Regex::new(r"\x1b\[[0-9;]*m").unwrap();
+    let stripped = ansi_regex.replace_all(input, "");
+    stripped.chars().count()
 }
