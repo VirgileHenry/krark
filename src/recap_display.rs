@@ -1,7 +1,8 @@
 const COLOR_GREEN: &str = "\x1b[32m";
 const COLOR_RED: &str = "\x1b[31m";
 const COLOR_RESET: &str = "\x1b[0m";
-
+const UNDERLINE_ON: &str = "\x1b[4m";
+const UNDERLINE_RESET: &str = "\x1b[24m";
 
 pub fn output_recap(
     harness: &crate::KrarkHarness,
@@ -28,10 +29,20 @@ pub fn output_recap(
         ("", "", "")
     };
 
-    let passed = recap.passed;
-    let failed = recap.failed;
-    let panicked = recap.panicked;
+    let (underline_on, underline_reset) = if color {
+        (UNDERLINE_ON, UNDERLINE_RESET)
+    } else {
+        ("", "")
+    };
+
+    let passed = recap.passed.len();
+    let failed = recap.failed.len();
+    let panicked = recap.panicked.len();
     let total = passed + failed + panicked;
+
+    let passed_perc = passed as f32 / total as f32 * 100.0;
+    let failed_perc = failed as f32 / total as f32 * 100.0;
+    let panicked_perc = panicked as f32 / total as f32 * 100.0;
 
     let color_passed = if passed == total {
         color_green
@@ -49,9 +60,27 @@ pub fn output_recap(
     let color_total = color_reset;
 
     let lines = [
-        ("Passed", format!("{}{} ({:.1}%){}",  color_passed, passed, passed as f32 / total as f32 * 100.0, color_reset)),
-        ("Failed", format!("{}{} ({:.1}%){}", color_failed, failed, failed as f32 / total as f32 * 100.0, color_reset)),
-        ("Panicked", format!("{}{} ({:.1}%){}", color_panicked, panicked, panicked as f32 / total as f32 * 100.0, color_reset)),
+        (
+            "Passed",
+            format!(
+                "{}{} ({:.1}%){}",
+                color_passed, passed, passed_perc, color_reset
+            ),
+        ),
+        (
+            "Failed",
+            format!(
+                "{}{} ({:.1}%){}",
+                color_failed, failed, failed_perc, color_reset
+            ),
+        ),
+        (
+            "Panicked",
+            format!(
+                "{}{} ({:.1}%){}",
+                color_panicked, panicked, panicked_perc, color_reset
+            ),
+        ),
         ("Total", format!("{}{}{}", color_total, total, color_reset)),
     ];
 
@@ -80,6 +109,37 @@ pub fn output_recap(
         }
     }
     table_display.separator_line("┗", &[("━", "┷"), ("━", "┛")])?;
+
+    /* Print errors / panics */
+
+    if failed > 0 {
+        let failed_shown = failed.min(harness.krark_args.max_failed_shown);
+        writeln!(
+            output,
+            "{}Failed: {}, showing {}{}",
+            underline_on, failed, failed_shown, underline_reset
+        )?;
+        for tc_failed in recap.failed.iter().take(failed_shown) {
+            writeln!(output, "\t{}:", tc_failed.card_name)?;
+            for check_failed in tc_failed.failed.iter() {
+                writeln!(output, "\t\t{}:", check_failed.check_name)?;
+                writeln!(output, "\t\t{}", check_failed.failure)?;
+            }
+        }
+    }
+
+    if panicked > 0 {
+        let panicked_shown = panicked.min(harness.krark_args.max_panicked_shown);
+        writeln!(
+            output,
+            "{}Panicked: {}, showing {}{}",
+            underline_on, panicked, panicked_shown, underline_reset
+        )?;
+        for tc_panicked in recap.panicked.iter().take(panicked_shown) {
+            writeln!(output, "\t{}:", tc_panicked.card_name)?;
+            writeln!(output, "\t\t{}:", tc_panicked.trace)?;
+        }
+    }
 
     Ok(())
 }
