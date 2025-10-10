@@ -29,10 +29,10 @@ impl KrarkHarness {
     }
 
     pub fn run<
-        F: Fn(&mtg_cardbase::Card, KrarkResult) -> KrarkResult + std::panic::RefUnwindSafe,
+        R: Fn(&mtg_cardbase::Card, KrarkResult) -> KrarkResult + std::panic::RefUnwindSafe,
     >(
         &mut self,
-        test_func: F,
+        test_func: R,
     ) {
         let mut recap = KrarkRecap::new(mtg_cardbase::ALL_CARDS.len());
 
@@ -51,12 +51,40 @@ impl KrarkHarness {
         }
     }
 
+    pub fn run_filter<
+        F: Fn(&mtg_cardbase::Card) -> bool,
+        R: Fn(&mtg_cardbase::Card, KrarkResult) -> KrarkResult + std::panic::RefUnwindSafe,
+    >(
+        &mut self,
+        filter: F,
+        test_func: R,
+    ) {
+        let mut recap = KrarkRecap::new(mtg_cardbase::ALL_CARDS.len());
+
+        for card in mtg_cardbase::ALL_CARDS.iter() {
+            if !filter(card) {
+                continue;
+            }
+            let result =
+                match std::panic::catch_unwind(|| test_func(card, KrarkResult::new(card.name))) {
+                    Ok(result) => result,
+                    Err(payload) => KrarkResult::from_panic_payload(card.name, payload),
+                };
+            recap.add_result(result);
+        }
+
+        match recap_display::output_recap(&self, recap) {
+            Ok(_) => { /* all good */ }
+            Err(e) => println!("Failed to output recap: {e}"),
+        }
+    }
+
     pub fn run_on_sample<
-        F: Fn(&mtg_cardbase::Card, KrarkResult) -> KrarkResult + std::panic::RefUnwindSafe,
+        R: Fn(&mtg_cardbase::Card, KrarkResult) -> KrarkResult + std::panic::RefUnwindSafe,
     >(
         &mut self,
         sample_size: usize,
-        test_func: F,
+        test_func: R,
     ) {
         let mut recap = KrarkRecap::new(sample_size);
 
